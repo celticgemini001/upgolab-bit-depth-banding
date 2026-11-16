@@ -42,6 +42,15 @@ pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1r
 code{font-size:.9em}
 footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -63,14 +72,14 @@ every number reproducible from the snippet at the end</p>
 <p>A smooth gradient in an 8-bit file cannot be smooth. There are only 256 code values, so a ramp
 that crosses the full tonal range over 1024 pixels must spend an average of four pixels on each
 value. Those four pixels are not a gradient — they are a flat plateau with a hard step at each end.
-Your visual system is very good at finding those steps, which is why banding shows up in skies,
+Your visual system is very good at finding those steps, which is why <a href="https://celticgemini001.github.io/upgolab-hdr-upscaling-bit-depth/">banding</a> shows up in skies,
 studio backdrops and skin falloff long before it shows up anywhere else.</p>
 
 <p>The usual remedies, in the order people recommend them:</p>
 
 <ol>
 <li>Work in 16-bit so the intermediate values exist.</li>
-<li>Dither before quantising to 8-bit, so the steps become noise instead of edges.</li>
+<li><a href="https://celticgemini001.github.io/upgolab-noise-and-grain-upscaling/">Dither</a> before quantising to 8-bit, so the steps become noise instead of edges.</li>
 <li>Encode video in 10-bit, which is said to cost 20–50% more bitrate but preserves the gradient.</li>
 </ol>
 
@@ -380,22 +389,14 @@ produces the 4K output — and the resampling order inside it — is what
 working from the master you give it, and no amount of later precision puts rungs back into a ladder
 that was built with 256 of them.</p>
 
+
+</article>
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with ffmpeg 6.1,
 numpy 1.26.4 and Pillow 12.2.0 on a 1024×256 synthetic sky ramp plus one 1080×1620 photograph;
 8 tables, 3 negative results (16-bit master does not survive 8-bit delivery; dither loses on RMSE by
 37%; 10-bit H.264 did not cost bitrate at any CRF tested). Every number reproducible from the
 snippet above; no value was adjusted after the run.
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
@@ -428,7 +429,6 @@ snippet above; no value was adjusted after the run.
 </ul>
 </nav>
 </footer>
-</article>
 </main>
 </body>
 </html>
