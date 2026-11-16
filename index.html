@@ -310,6 +310,93 @@ here. What does reproduce is that 10-bit is never meaningfully <em>more</em> exp
 banding-prone content it is dramatically cheaper.</p>
 </div>
 
+<h2>Measurement 9 — banding width is a code-value budget, not a bit depth</h2>
+
+<p>Every measurement above changes one variable and watches the plateau: bit depth, dither, grain,
+encoder. The variable I had never isolated is the one people actually complain about at the other
+end of a support thread: <em>"the grey gradient is fine but the sky bands."</em> If banding were a
+property of precision, a blue sky and a grey card would band identically, because both are 8-bit.
+They do not. So precision is not the variable that sets the plateau width.</p>
+
+<p>The prediction is arithmetic. A ramp that traverses <code>S</code> code values across
+<code>W</code> pixels is stored at one code value per <code>W / S</code> pixels, whatever the bit
+depth is, provided the delivery is 8-bit. I built ramps of identical geometry — 1024 px wide, 256 px
+tall, one channel — and varied only how much of the 8-bit range the ramp spans.</p>
+
+<table>
+<thead><tr><th>Ramp span (code values)</th><th>Distinct plateaus</th><th>Measured mean width</th><th>Predicted W/S</th><th>Error</th></tr></thead>
+<tbody>
+<tr><td>255</td><td class="num">256</td><td class="num">4.00 px</td><td class="num">4.02 px</td><td class="num">0.39%</td></tr>
+<tr><td>210</td><td class="num">211</td><td class="num">4.85 px</td><td class="num">4.88 px</td><td class="num">0.47%</td></tr>
+<tr><td>105</td><td class="num">106</td><td class="num">9.66 px</td><td class="num">9.75 px</td><td class="num">0.94%</td></tr>
+<tr><td>45</td><td class="num">46</td><td class="num">22.26 px</td><td class="num">22.76 px</td><td class="num">2.17%</td></tr>
+<tr><td>21</td><td class="num">22</td><td class="num">46.55 px</td><td class="num">48.76 px</td><td class="num">4.55%</td></tr>
+</tbody>
+</table>
+
+<p>The model holds to within 5% across a 12× range, and the error grows as the step count shrinks —
+which is what you expect when the last plateau is clipped by the end of the ramp. A sky banding at
+46 px per step is spanning about 21 code values, not 255. <strong>The plateau width is the reciprocal
+of the span you asked for, and no bit depth fixes a ramp that only occupies a fifth of the range.</strong></p>
+
+<p>That immediately explains the sky-versus-grey asymmetry without inventing a mechanism. A grey
+gradient that walks 0→255 uses the whole budget. A saturated sky gradient holds red and green
+roughly flat and moves blue over the top third of the range, so it spends maybe a fifth of the
+budget — and lands on plateaus five times wider, at the same 8 bits.</p>
+
+<p>There is a second half to it, and it is the part the arithmetic does not predict. Holding the span
+fixed at 105 code values and sliding the ramp up the range leaves the plateau width <em>exactly</em>
+unchanged — 9.66 px at every offset — but the perceptual size of each step falls monotonically as the
+ramp moves toward white:</p>
+
+<table>
+<thead><tr><th>Ramp start</th><th>Ramp end</th><th>Plateaus</th><th>Mean width</th><th>Mean ΔE per step</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>105</td><td class="num">106</td><td class="num">9.66 px</td><td class="num">0.423</td></tr>
+<tr><td>50</td><td>155</td><td class="num">106</td><td class="num">9.66 px</td><td class="num">0.411</td></tr>
+<tr><td>100</td><td>205</td><td class="num">106</td><td class="num">9.66 px</td><td class="num">0.381</td></tr>
+<tr><td>150</td><td>255</td><td class="num">106</td><td class="num">9.66 px</td><td class="num">0.361</td></tr>
+</tbody>
+</table>
+
+<p>Identical geometry, identical step count, and the dark-end ramp is <strong>17% more visible per
+step</strong> than the bright-end one (0.423 vs 0.361 in CIELAB ΔE). sRGB is non-linear, so one code
+step near black covers a larger perceptual distance than one near white. Both effects point the same
+way: dark, low-span gradients band worst, which is exactly where a blue sky sits.</p>
+
+<h2>Measurement 10 — the extra precision does not survive delivery, again</h2>
+
+<p>The natural fix people reach for is "grade at 10-bit." Measurement 2 already showed a 16-bit
+master does not survive an 8-bit delivery, but that test changed the master <em>and</em> the
+delivery. This one isolates it: build the same ramp at 8-, 10- and 12-bit precision, then deliver
+all three at 8-bit, and count what arrives.</p>
+
+<table>
+<thead><tr><th>Path</th><th>Plateaus delivered</th><th>Mean ΔE per step</th></tr></thead>
+<tbody>
+<tr><td>8-bit source → 8-bit delivery</td><td class="num">256</td><td class="num">0.392</td></tr>
+<tr><td>10-bit source → 8-bit delivery</td><td class="num">256</td><td class="num">0.392</td></tr>
+<tr><td>12-bit source → 8-bit delivery</td><td class="num">256</td><td class="num">0.392</td></tr>
+</tbody>
+</table>
+
+<p>Identical to three decimals. This is a negative result and I am reporting it as one: on a static
+ramp, <em>the bit depth of the intermediate makes no measurable difference once the delivery is
+8-bit</em>. The 256 plateaus are put there by the final quantiser and nothing upstream can remove
+them. Where a 10-bit intermediate <em>does</em> earn its keep is Measurement 8's case — when the
+delivery is also 10-bit, or when a grade stretches the contrast so far that 8-bit intermediate
+rounding gets amplified before the final quantise. Precision is insurance against a downstream
+operation, not a substitute for one.</p>
+
+<div class="callout warn">
+<p><strong>What this changes in practice.</strong> If a gradient bands, the first question is not
+"do I need 10-bit?" but "how much of the code range does this gradient actually span?" A sky
+squeezed into 60 code values will band at 8 bits and still band at 10 bits if the delivery is 8-bit,
+because 60 values is the budget. Widening the range — via a curve that expands the gradient rather
+than the whole image — is the lever that moves the plateau width. Bit depth only helps when the
+extra values reach the viewer.</p>
+</div>
+
 <h2>What I would actually do</h2>
 
 <ol>
@@ -328,7 +415,7 @@ acceptance test is a per-pixel metric you will always ship the banded version.</
 real footage. 12-bit and above bought nothing measurable on a 1280-wide ramp.</li>
 </ol>
 
-<h2>Reproducing all eight measurements</h2>
+<h2>Reproducing all ten measurements</h2>
 
 <p>Needs <code>ffmpeg</code>, <code>numpy</code>. Every figure above comes from counting runs of
 identical values in raw decoded rows — no screenshots, no eyeballing.</p>
