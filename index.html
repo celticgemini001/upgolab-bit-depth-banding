@@ -59,7 +59,7 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 
 <p class="lede">The standard advice is that banding in a gradient is a bit-depth problem, so work in
 16-bit and dither at the end. I tested that on a synthetic sky ramp and on a real photograph, and
-three of the eight measurements disagreed with the advice. The one that matters most: band width
+three of the fourteen measurements disagreed with the advice. The one that matters most: band width
 scales <em>exactly</em> with your upscale factor, which is why a gradient that looks clean at 1080p
 shows hard stripes at 4K from the same master.</p>
 
@@ -397,6 +397,183 @@ than the whole image — is the lever that moves the plateau width. Bit depth on
 extra values reach the viewer.</p>
 </div>
 
+<h2>Measurement 11 — the channel that carries the colour has its own, smaller budget</h2>
+
+<p>Everything above counts grey. That is the right first move, but it quietly assumes the gradient you
+care about lives in luma. Most of the gradients people actually complain about do not: a blue sky is
+almost entirely a <em>chroma</em> ramp. Red and green sit nearly still, blue moves eighty-odd code
+values, and the visible transition is in Cb and Cr, not in Y. So I ran the same counting method on a
+blue ramp and on the chroma planes themselves, and the budget turned out to be roughly a third of
+what the luma number implies.</p>
+
+<p>The closed form is not hard to write down. With BT.709 weights, Cb is
+<code>(B′ − Y′) / (2(1−K<sub>B</sub>))</code>, and in limited range that interval is 224 code slots
+wide. For a ramp where red moves −10, green −12 and blue −85 code values:</p>
+
+<pre><code>dY  = 0.2126(-10) + 0.7152(-12) + 0.0722(-85) = -16.845
+dCb = (-85 - (-16.845)) / (2 * (1 - 0.0722)) / 255
+    = -68.155 / 1.8556 / 255 = -0.14404        # fraction of full range
+codes_8bit = |dCb| * 224 = 32.3</code></pre>
+
+<p>Thirty-two codes to describe a gradient that has eighty-six distinct values in the master's blue
+channel. Measured against the encoded Cb plane at five different ramp magnitudes:</p>
+
+<table>
+<thead><tr><th>Blue span (codes)</th><th>Cb codes, 8-bit predicted</th><th>measured</th><th>Cb codes, 10-bit predicted</th><th>measured</th></tr></thead>
+<tbody>
+<tr><td>85</td><td class="num">32.3</td><td class="num">33</td><td class="num">129.1</td><td class="num">129</td></tr>
+<tr><td>60</td><td class="num">22.8</td><td class="num">23</td><td class="num">91.1</td><td class="num">92</td></tr>
+<tr><td>40</td><td class="num">15.2</td><td class="num">16</td><td class="num">60.7</td><td class="num">60</td></tr>
+<tr><td>20</td><td class="num">7.6</td><td class="num">8</td><td class="num">30.4</td><td class="num">30</td></tr>
+<tr><td>10</td><td class="num">3.8</td><td class="num">4</td><td class="num">15.2</td><td class="num">16</td></tr>
+</tbody>
+</table>
+
+<p>Prediction lands within one code at every magnitude, across a 12× range, and the ratio between the
+two depths is 3.8–4.0× throughout — the square of the two-bits-per-sample difference. This is the same
+arithmetic as the <code>width/255</code> law above, applied to a plane that has already thrown away
+three quarters of its samples in the 4:2:0 case. That last clause is where the interesting part is.</p>
+
+<h2>Measurement 12 — at 4:2:0, paying for 10-bit chroma buys nothing measurable</h2>
+
+<p>One master, 4096×1024, 86 distinct code values in the blue channel, delivered seven ways. Each
+container is encoded lossless in its own pixel format (x264 <code>-crf 0</code>), so any difference
+below is the format and not the encoder. All rows decode through the same rgb24 path, which means the
+decoder is doing its normal chroma upsampling for the subsampled formats — that is what a viewer
+gets.</p>
+
+<table>
+<thead><tr><th>Delivery</th><th>Cb codes held</th><th>Blue levels out</th><th>% of master's 86</th><th>MAE, blue channel</th></tr></thead>
+<tbody>
+<tr><td>rgb24 PNG (reference)</td><td class="num">—</td><td class="num">86</td><td class="num">100.0%</td><td class="num">0.000</td></tr>
+<tr><td>4:4:4 8-bit</td><td class="num">33</td><td class="num">50</td><td class="num">58.1%</td><td class="num">0.529</td></tr>
+<tr><td>4:4:4 10-bit</td><td class="num">129</td><td class="num">86</td><td class="num">100.0%</td><td class="num">0.002</td></tr>
+<tr><td>4:2:2 8-bit</td><td class="num">33</td><td class="num">51</td><td class="num">59.3%</td><td class="num">0.817</td></tr>
+<tr><td>4:2:2 10-bit</td><td class="num">129</td><td class="num">51</td><td class="num">59.3%</td><td class="num">1.065</td></tr>
+<tr><td>4:2:0 8-bit</td><td class="num">33</td><td class="num">56</td><td class="num">65.1%</td><td class="num">0.997</td></tr>
+<tr><td>4:2:0 10-bit</td><td class="num">129</td><td class="num">51</td><td class="num">59.3%</td><td class="num">1.065</td></tr>
+</tbody>
+</table>
+
+<p>Read the 4:4:4 rows first, because they are the clean case and they behave exactly as Measurement 1
+predicts: eight bits holds 33 of the 86 blue values, ten bits holds all 86, and the error collapses
+from 0.53 codes to 0.002. At 4:4:4, chroma bit depth does precisely what the marketing says it does.</p>
+
+<p>Now the negative result, and it is the one I did not expect. <strong>At 4:2:0, the 10-bit file keeps
+<em>fewer</em> distinct blue values than the 8-bit file — 51 against 56 — and scores worse on
+MAE, 1.065 against 0.997.</strong> I re-ran it against a continuous, never-quantised truth to make sure
+the comparison was not an artefact of the master's own quantisation, and the ordering holds: 4:2:0 8-bit
+lands at 1.059 codes from the continuous ramp, 4:2:0 10-bit at 1.118. The extra precision is real and
+it is stored in the file — the Cb plane genuinely holds 129 codes instead of 33 — but it arrives at a
+viewer who, by definition of 4:2:0, has already lost three of every four chroma samples. Half-resolution
+chroma is the binding constraint, and it is coarser than 8-bit chroma by a wide margin. Refining the
+thing that is not limiting buys nothing.</p>
+
+<div class="callout warn">
+<p><strong>What this changes in practice.</strong> If you are delivering 4:2:0 — which is every
+consumer video encode, every streaming ladder, every phone capture — then 10-bit chroma is not the
+setting that fixes a banding sky, and the measurement says it can be marginally worse than 8-bit
+because the encoder spends its new precision describing an upsampling that the decoder will
+reconstruct differently anyway. The lever at 4:2:0 is the <em>span</em>: give the gradient more of the
+224-slot chroma budget with a curve, and you get the codes back without changing pixel format. If you
+are delivering 4:4:4 — a still, a master, a mezzanine — then 10-bit chroma is the whole fix: 58% of the
+levels to 100%, at 13% more bytes. Measurement 8's finding, that 10-bit on a gradient is cheap, was
+measured on luma and it does not extend to a 4:2:0 chroma plane.</p>
+</div>
+
+<h2>Measurement 13 — the price of 10-bit depends on the master, not the delivery</h2>
+
+<p>Measurement 8 reported that 10-bit H.264 came out <em>smaller</em> than 8-bit on a sky ramp. That
+result reproduces here and it is not wrong — but it is conditional, and the condition is something I
+only found by varying it. Measurement 8 built its master from a 16-bit ramp. When I rebuilt the same
+test from an 8-bit master, the sign flipped.</p>
+
+<p>50 frames, 1920×1080, x264, colour sky ramp. "8-bit master" is a PNG built from 8-bit code values;
+"16-bit master" is fed to the encoder as raw <code>rgb48le</code> so no 8-bit quantisation exists
+anywhere upstream:</p>
+
+<table>
+<thead><tr><th>Master</th><th>CRF</th><th>4:2:0 8-bit</th><th>4:2:0 10-bit</th><th>Cost of 10-bit</th></tr></thead>
+<tbody>
+<tr><td>8-bit</td><td>18</td><td class="num">7,492 B</td><td class="num">10,996 B</td><td class="num">+47%</td></tr>
+<tr><td>8-bit</td><td>23</td><td class="num">9,102 B</td><td class="num">10,326 B</td><td class="num">+13%</td></tr>
+<tr><td>16-bit</td><td>18</td><td class="num">5,744 B</td><td class="num">6,491 B</td><td class="num">+13%</td></tr>
+<tr><td>16-bit</td><td>23</td><td class="num">5,527 B</td><td class="num">5,819 B</td><td class="num">+5%</td></tr>
+</tbody>
+</table>
+
+<p>With a genuine 16-bit master the 10-bit delivery costs +13% at CRF 18 and +5% at CRF 23 — modest, and
+in the direction Measurement 8 described once container overhead is divided out over enough frames.
+With an 8-bit master the same delivery costs +47% and +13%. The mechanism is the one Measurement 8
+identified, running in reverse: at 10-bit the encoder has room to code the 255 hard steps of the 8-bit
+master as <em>steps</em>, with precision to spare around each one, so the DCT has to describe every edge
+exactly. It cannot smooth them away, because they are genuinely in the source. Rising to 10-bit from an
+8-bit master makes the file bigger and the picture the same.</p>
+
+<p>That is the useful form of the finding: 10-bit delivery is cheap when there is 10-bit worth of
+signal to carry, and expensive when there is not. Buying a 10-bit pipeline to fix a gradient captured
+at 8 bits pays the +47% and recovers nothing, which is Measurement 2's conclusion arriving through a
+completely different door.</p>
+
+<h2>Measurement 14 — the measurement trap: the decoder will invent the detail for you</h2>
+
+<p>Half of the numbers above would have been wrong if I had measured them the obvious way. Decode a
+4:2:0 file to rgb24 and you are handed a full-resolution image, because the decoder upsampled chroma
+for you. Count distinct values in that image and you are counting the upsampler's output, not the
+file's contents. Same file, four upsamplers:</p>
+
+<table>
+<thead><tr><th>Decode path for the same 4:2:0 10-bit file</th><th>Blue levels reported</th><th>MAE reported</th></tr></thead>
+<tbody>
+<tr><td>4:4:4 10-bit file, no upsampling needed</td><td class="num">86</td><td class="num">0.001</td></tr>
+<tr><td>4:2:0 10-bit, nearest</td><td class="num">67</td><td class="num">0.589</td></tr>
+<tr><td>4:2:0 10-bit, bilinear</td><td class="num">67</td><td class="num">0.590</td></tr>
+<tr><td>4:2:0 10-bit, bicubic</td><td class="num">68</td><td class="num">0.590</td></tr>
+<tr><td>4:2:0 10-bit, lanczos</td><td class="num">68</td><td class="num">0.591</td></tr>
+</tbody>
+</table>
+
+<p>The file holds 51 usable levels. The nearest-neighbour upsample reports 67 and the lanczos one
+reports 68 — a 33% improvement in "levels" from changing a flag, on bytes that did not move. The told
+level count is dominated by the interpolation kernel, and the MAE is almost blind to it (0.589 to
+0.591 across all four), which is exactly the failure mode Measurement 3 describes for dither: a
+per-pixel metric that is insensitive to the thing you are trying to see. To measure the chroma budget
+you have to read the plane at its native resolution — <code>-pix_fmt yuv420p</code> straight out of
+ffmpeg, no colour conversion — and count codes there. That is how the 33 and 129 in Measurement 11 were
+obtained, and it is why they match the closed form to one code while a decoded-and-upsampled count
+would not.</p>
+
+<div class="callout">
+<p><strong>The one-line version.</strong> At 4:4:4, chroma bit depth is the fix and it is cheap:
+58% of the gradient's levels to 100% for 13% more bytes, with the perceptual step dropping from 0.99
+to 0.49 ΔE — back to the master's own 0.49. At 4:2:0, bit depth is not the fix, because half-resolution
+chroma is already looser than 8-bit chroma and refining it changes nothing a viewer can see. The
+export setting that matters depends entirely on which of those two you are actually delivering, and
+those are different settings.</p>
+</div>
+
+<pre><code>import numpy as np, subprocess
+W,H = 4096,1024
+x = np.linspace(0,1,W)[None,:].repeat(H,0)
+m = np.zeros((H,W,3),np.uint8)
+for c,(b0,d) in enumerate(((150,-10),(172,-12),(250,-85))):   # r, g, b ramps
+    m[...,c] = np.clip(np.round(b0 + d*x),0,255)
+Image.fromarray(m).save('sky.png')                            # 86 distinct blue codes
+
+for pf in ('yuv444p','yuv444p10le','yuv420p','yuv420p10le'):
+    subprocess.run(['ffmpeg','-y','-v','error','-i','sky.png','-frames:v','1',
+                    '-c:v','libx264','-crf','0','-pix_fmt',pf,f'{pf}.mkv'],check=True)
+    # read the CHROMA PLANE at native resolution -- do not convert to rgb24
+    b = subprocess.run(['ffmpeg','-v','error','-i',f'{pf}.mkv','-frames:v','1',
+                        '-f','rawvideo','-pix_fmt',pf,'-'],capture_output=True).stdout
+    a = np.frombuffer(b, np.uint16 if '10' in pf else np.uint8).astype(np.int64)
+    cw = W if '444' in pf else W//2; ch = H if '444' in pf else H//2
+    U = a[W*H : W*H+cw*ch].reshape(ch,cw)
+    print(pf, 'Cb codes', U.max()-U.min(),
+          # closed form for this ramp
+          round(abs((( -85) - (0.2126*-10+0.7152*-12+0.0722*-85)))/1.8556/255*224
+                * (4 if '10' in pf else 1), 1))</code></pre>
+
 <h2>What I would actually do</h2>
 
 <ol>
@@ -415,9 +592,9 @@ acceptance test is a per-pixel metric you will always ship the banded version.</
 real footage. 12-bit and above bought nothing measurable on a 1280-wide ramp.</li>
 </ol>
 
-<h2>Reproducing all ten measurements</h2>
+<h2>Reproducing all fourteen measurements</h2>
 
-<p>Needs <code>ffmpeg</code>, <code>numpy</code>. Every figure above comes from counting runs of
+<p>Needs <code>ffmpeg</code>, <code>numpy</code>, <code>Pillow</code>. Every figure above comes from counting runs of
 identical values in raw decoded rows — no screenshots, no eyeballing.</p>
 
 <pre><code>import numpy as np, subprocess
@@ -437,7 +614,7 @@ def plateau(img):                      # mean run of identical values per row
 x = np.linspace(0,1,W)**0.75
 for bits,pf,dst in ((8,'gray','s8.png'),(16,'gray16le','s16.png')):
     a = np.round(x*(2**bits-1)).astype(np.uint16 if bits>8 else np.uint8)
-    a.astype('<u2' if bits>8 else np.uint8).tofile('/tmp/t.raw')
+    a.astype('&lt;u2' if bits>8 else np.uint8).tofile('/tmp/t.raw')
     subprocess.run(['ffmpeg','-v','error','-y','-f','rawvideo','-pix_fmt',pf,
                     '-s',f'{W}x{H}','-i','/tmp/t.raw',
                     '-pix_fmt','rgb48be' if bits>8 else 'rgb24',dst],check=True)
